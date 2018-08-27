@@ -3,6 +3,10 @@
 ## Development Instructions
 
 - Ensure that you have Go installed
+    ```bash
+    $ go version
+    go version go1.10.3 darwin/amd64
+    ```
 - Clone the repo to your `$GOPATH/src/github.com/arsidada`. For example:
     ```bash
     $ echo $GOPATH
