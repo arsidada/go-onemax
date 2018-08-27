@@ -4,7 +4,7 @@
 
 - Ensure that you have Go installed
 - Clone the repo to your `$GOPATH/src/github.com/arsidada`. For example:
-    ```
+    ```bash
     $ echo $GOPATH
     /Users/arsalan/dev/max/go
 
