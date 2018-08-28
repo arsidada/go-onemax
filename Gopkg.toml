@@ -36,3 +36,10 @@
 [prune]
   go-tests = true
   unused-packages = true
+
+[metadata.heroku]
+  root-package = "github.com/arsidada/go-onemax"
+  go-version = "go1.10"
+  install = [ "./..." ]
+  ensure = "false"
+  additional-tools = ["github.com/golang-migrate/migrate"]
