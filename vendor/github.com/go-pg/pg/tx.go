@@ -95,6 +95,8 @@ func (tx *Tx) conn() (*pool.Conn, error) {
 	if tx.cn == nil {
 		return nil, errTxDone
 	}
+
+	tx.cn.SetTimeout(tx.db.opt.ReadTimeout, tx.db.opt.WriteTimeout)
 	return tx.cn, nil
 }
 
@@ -242,19 +244,16 @@ func (tx *Tx) Delete(model interface{}) error {
 	return orm.Delete(tx, model)
 }
 
-// Delete forces delete of the model with deleted_at column.
-func (tx *Tx) ForceDelete(model interface{}) error {
-	return orm.ForceDelete(tx, model)
-}
-
 // CreateTable is an alias for DB.CreateTable.
 func (tx *Tx) CreateTable(model interface{}, opt *orm.CreateTableOptions) error {
-	return orm.CreateTable(tx, model, opt)
+	_, err := orm.CreateTable(tx, model, opt)
+	return err
 }
 
 // DropTable is an alias for DB.DropTable.
 func (tx *Tx) DropTable(model interface{}, opt *orm.DropTableOptions) error {
-	return orm.DropTable(tx, model, opt)
+	_, err := orm.DropTable(tx, model, opt)
+	return err
 }
 
 // CopyFrom is an alias for DB.CopyFrom.

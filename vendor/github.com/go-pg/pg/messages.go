@@ -1,8 +1,10 @@
 package pg
 
 import (
+	"bufio"
 	"crypto/md5"
 	"crypto/tls"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -58,114 +60,93 @@ const (
 
 var errEmptyQuery = internal.Errorf("pg: query is empty")
 
-func (db *DB) startup(cn *pool.Conn, user, password, database string) error {
-	err := cn.WithWriter(db.opt.WriteTimeout, func(wb *pool.WriteBuffer) error {
-		writeStartupMsg(wb, user, database)
-		return nil
-	})
-	if err != nil {
+func startup(cn *pool.Conn, user, password, database string) error {
+	writeStartupMsg(cn.Writer, user, database)
+	if err := cn.FlushWriter(); err != nil {
 		return err
 	}
 
-	return cn.WithReader(db.opt.ReadTimeout, func(rd *pool.Reader) error {
-		for {
-			c, msgLen, err := rd.ReadMessageType()
+	for {
+		c, msgLen, err := readMessageType(cn)
+		if err != nil {
+			return err
+		}
+		switch c {
+		case backendKeyDataMsg:
+			processId, err := readInt32(cn)
 			if err != nil {
 				return err
 			}
-
-			switch c {
-			case backendKeyDataMsg:
-				processId, err := rd.ReadInt32()
-				if err != nil {
-					return err
-				}
-				secretKey, err := rd.ReadInt32()
-				if err != nil {
-					return err
-				}
-				cn.ProcessId = processId
-				cn.SecretKey = secretKey
-			case parameterStatusMsg:
-				if err := logParameterStatus(rd, msgLen); err != nil {
-					return err
-				}
-			case authenticationOKMsg:
-				err := db.authenticate(cn, rd, user, password)
-				if err != nil {
-					return err
-				}
-			case readyForQueryMsg:
-				_, err := rd.ReadN(msgLen)
+			secretKey, err := readInt32(cn)
+			if err != nil {
 				return err
-			case errorResponseMsg:
-				e, err := rd.ReadError()
-				if err != nil {
-					return err
-				}
-				return e
-			default:
-				return fmt.Errorf("pg: unknown startup message response: %q", c)
 			}
+			cn.ProcessId = processId
+			cn.SecretKey = secretKey
+		case parameterStatusMsg:
+			if err := logParameterStatus(cn, msgLen); err != nil {
+				return err
+			}
+		case authenticationOKMsg:
+			if err := authenticate(cn, user, password); err != nil {
+				return err
+			}
+		case readyForQueryMsg:
+			_, err := cn.ReadN(msgLen)
+			return err
+		case errorResponseMsg:
+			e, err := readError(cn)
+			if err != nil {
+				return err
+			}
+			return e
+		default:
+			return fmt.Errorf("pg: unknown startup message response: %q", c)
 		}
-	})
+	}
 }
 
 var errSSLNotSupported = errors.New("pg: SSL is not enabled on the server")
 
-func (db *DB) enableSSL(cn *pool.Conn, tlsConf *tls.Config) error {
-	err := cn.WithWriter(db.opt.WriteTimeout, func(wb *pool.WriteBuffer) error {
-		writeSSLMsg(wb)
-		return nil
-	})
-	if err != nil {
+func enableSSL(cn *pool.Conn, tlsConf *tls.Config) error {
+	writeSSLMsg(cn.Writer)
+	if err := cn.FlushWriter(); err != nil {
 		return err
 	}
 
-	err = cn.WithReader(db.opt.ReadTimeout, func(rd *pool.Reader) error {
-		c, err := rd.ReadByte()
-		if err != nil {
-			return err
-		}
-		if c != 'S' {
-			return errSSLNotSupported
-		}
-		return nil
-	})
+	c, err := cn.Reader.ReadByte()
 	if err != nil {
 		return err
+	}
+	if c != 'S' {
+		return errSSLNotSupported
 	}
 
 	cn.SetNetConn(tls.Client(cn.NetConn(), tlsConf))
 	return nil
 }
 
-func (db *DB) authenticate(cn *pool.Conn, rd *pool.Reader, user, password string) error {
-	num, err := rd.ReadInt32()
+func authenticate(cn *pool.Conn, user, password string) error {
+	num, err := readInt32(cn)
 	if err != nil {
 		return err
 	}
-
 	switch num {
 	case 0:
 		return nil
 	case 3:
-		err := cn.WithWriter(db.opt.WriteTimeout, func(wb *pool.WriteBuffer) error {
-			writePasswordMsg(wb, password)
-			return nil
-		})
-		if err != nil {
+		writePasswordMsg(cn.Writer, password)
+		if err := cn.FlushWriter(); err != nil {
 			return err
 		}
 
-		c, _, err := rd.ReadMessageType()
+		c, _, err := readMessageType(cn)
 		if err != nil {
 			return err
 		}
-
 		switch c {
 		case authenticationOKMsg:
-			code, err := rd.ReadInt32()
+			code, err := readInt32(cn)
 			if err != nil {
 				return err
 			}
@@ -174,7 +155,7 @@ func (db *DB) authenticate(cn *pool.Conn, rd *pool.Reader, user, password string
 			}
 			return nil
 		case errorResponseMsg:
-			e, err := rd.ReadError()
+			e, err := readError(cn)
 			if err != nil {
 				return err
 			}
@@ -183,27 +164,25 @@ func (db *DB) authenticate(cn *pool.Conn, rd *pool.Reader, user, password string
 			return fmt.Errorf("pg: unknown password message response: %q", c)
 		}
 	case 5:
-		b, err := rd.ReadN(4)
+		b, err := cn.ReadN(4)
 		if err != nil {
 			return err
 		}
 
 		secret := "md5" + md5s(md5s(password+user)+string(b))
-		err = cn.WithWriter(db.opt.WriteTimeout, func(wb *pool.WriteBuffer) error {
-			writePasswordMsg(wb, secret)
-			return nil
-		})
+		writePasswordMsg(cn.Writer, secret)
+		err = cn.FlushWriter()
 		if err != nil {
 			return err
 		}
 
-		c, _, err := rd.ReadMessageType()
+		c, _, err := readMessageType(cn)
 		if err != nil {
 			return err
 		}
 		switch c {
 		case authenticationOKMsg:
-			code, err := rd.ReadInt32()
+			code, err := readInt32(cn)
 			if err != nil {
 				return err
 			}
@@ -212,7 +191,7 @@ func (db *DB) authenticate(cn *pool.Conn, rd *pool.Reader, user, password string
 			}
 			return nil
 		case errorResponseMsg:
-			e, err := rd.ReadError()
+			e, err := readError(cn)
 			if err != nil {
 				return err
 			}
@@ -311,58 +290,49 @@ func writeParseDescribeSyncMsg(buf *pool.WriteBuffer, name, q string) {
 	writeSyncMsg(buf)
 }
 
-func readParseDescribeSync(rd *pool.Reader) ([][]byte, error) {
+func readParseDescribeSync(cn *pool.Conn) ([][]byte, error) {
 	var columns [][]byte
-	var firstErr error
 	for {
-		c, msgLen, err := rd.ReadMessageType()
+		c, msgLen, err := readMessageType(cn)
 		if err != nil {
 			return nil, err
 		}
 		switch c {
 		case parseCompleteMsg:
-			_, err = rd.ReadN(msgLen)
+			_, err = cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
 		case rowDescriptionMsg: // Response to the DESCRIBE message.
-			columns, err = readRowDescription(rd, nil)
+			columns, err = readRowDescription(cn, nil)
 			if err != nil {
 				return nil, err
 			}
 		case parameterDescriptionMsg: // Response to the DESCRIBE message.
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
 		case noDataMsg: // Response to the DESCRIBE message.
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
 		case readyForQueryMsg:
-			_, err := rd.ReadN(msgLen)
-			if err != nil {
-				return nil, err
-			}
-			if firstErr != nil {
-				return nil, firstErr
-			}
+			_, err := cn.ReadN(msgLen)
 			return columns, err
 		case errorResponseMsg:
-			e, err := rd.ReadError()
+			e, err := readError(cn)
 			if err != nil {
 				return nil, err
 			}
-			if firstErr == nil {
-				firstErr = e
-			}
+			return nil, e
 		case noticeResponseMsg:
-			if err := logNotice(rd, msgLen); err != nil {
+			if err := logNotice(cn, msgLen); err != nil {
 				return nil, err
 			}
 		case parameterStatusMsg:
-			if err := logParameterStatus(rd, msgLen); err != nil {
+			if err := logParameterStatus(cn, msgLen); err != nil {
 				return nil, err
 			}
 		default:
@@ -408,28 +378,28 @@ func writeCloseMsg(buf *pool.WriteBuffer, name string) {
 	buf.FinishMessage()
 }
 
-func readCloseCompleteMsg(rd *pool.Reader) error {
+func readCloseCompleteMsg(cn *pool.Conn) error {
 	for {
-		c, msgLen, err := rd.ReadMessageType()
+		c, msgLen, err := readMessageType(cn)
 		if err != nil {
 			return err
 		}
 		switch c {
 		case closeCompleteMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			return err
 		case errorResponseMsg:
-			e, err := rd.ReadError()
+			e, err := readError(cn)
 			if err != nil {
 				return err
 			}
 			return e
 		case noticeResponseMsg:
-			if err := logNotice(rd, msgLen); err != nil {
+			if err := logNotice(cn, msgLen); err != nil {
 				return err
 			}
 		case parameterStatusMsg:
-			if err := logParameterStatus(rd, msgLen); err != nil {
+			if err := logParameterStatus(cn, msgLen); err != nil {
 				return err
 			}
 		default:
@@ -438,18 +408,18 @@ func readCloseCompleteMsg(rd *pool.Reader) error {
 	}
 }
 
-func readSimpleQuery(rd *pool.Reader) (*result, error) {
+func readSimpleQuery(cn *pool.Conn) (*result, error) {
 	var res result
 	var firstErr error
 	for {
-		c, msgLen, err := rd.ReadMessageType()
+		c, msgLen, err := readMessageType(cn)
 		if err != nil {
 			return nil, err
 		}
 
 		switch c {
 		case commandCompleteMsg:
-			b, err := rd.ReadN(msgLen)
+			b, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
@@ -457,7 +427,7 @@ func readSimpleQuery(rd *pool.Reader) (*result, error) {
 				firstErr = err
 			}
 		case readyForQueryMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
@@ -466,18 +436,18 @@ func readSimpleQuery(rd *pool.Reader) (*result, error) {
 			}
 			return &res, nil
 		case rowDescriptionMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
 		case dataRowMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
 			res.returned++
 		case errorResponseMsg:
-			e, err := rd.ReadError()
+			e, err := readError(cn)
 			if err != nil {
 				return nil, err
 			}
@@ -489,11 +459,11 @@ func readSimpleQuery(rd *pool.Reader) (*result, error) {
 				firstErr = errEmptyQuery
 			}
 		case noticeResponseMsg:
-			if err := logNotice(rd, msgLen); err != nil {
+			if err := logNotice(cn, msgLen); err != nil {
 				return nil, err
 			}
 		case parameterStatusMsg:
-			if err := logParameterStatus(rd, msgLen); err != nil {
+			if err := logParameterStatus(cn, msgLen); err != nil {
 				return nil, err
 			}
 		default:
@@ -502,29 +472,29 @@ func readSimpleQuery(rd *pool.Reader) (*result, error) {
 	}
 }
 
-func readExtQuery(rd *pool.Reader) (*result, error) {
+func readExtQuery(cn *pool.Conn) (*result, error) {
 	var res result
 	var firstErr error
 	for {
-		c, msgLen, err := rd.ReadMessageType()
+		c, msgLen, err := readMessageType(cn)
 		if err != nil {
 			return nil, err
 		}
 
 		switch c {
 		case bindCompleteMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
 		case dataRowMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
 			res.returned++
 		case commandCompleteMsg: // Response to the EXECUTE message.
-			b, err := rd.ReadN(msgLen)
+			b, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
@@ -532,7 +502,7 @@ func readExtQuery(rd *pool.Reader) (*result, error) {
 				firstErr = err
 			}
 		case readyForQueryMsg: // Response to the SYNC message.
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
@@ -541,7 +511,7 @@ func readExtQuery(rd *pool.Reader) (*result, error) {
 			}
 			return &res, nil
 		case errorResponseMsg:
-			e, err := rd.ReadError()
+			e, err := readError(cn)
 			if err != nil {
 				return nil, err
 			}
@@ -553,11 +523,11 @@ func readExtQuery(rd *pool.Reader) (*result, error) {
 				firstErr = errEmptyQuery
 			}
 		case noticeResponseMsg:
-			if err := logNotice(rd, msgLen); err != nil {
+			if err := logNotice(cn, msgLen); err != nil {
 				return nil, err
 			}
 		case parameterStatusMsg:
-			if err := logParameterStatus(rd, msgLen); err != nil {
+			if err := logParameterStatus(cn, msgLen); err != nil {
 				return nil, err
 			}
 		default:
@@ -566,22 +536,19 @@ func readExtQuery(rd *pool.Reader) (*result, error) {
 	}
 }
 
-func readRowDescription(rd *pool.Reader, columns [][]byte) ([][]byte, error) {
-	colNum, err := rd.ReadInt16()
+func readRowDescription(cn *pool.Conn, columns [][]byte) ([][]byte, error) {
+	colNum, err := readInt16(cn)
 	if err != nil {
 		return nil, err
 	}
 
 	columns = setByteSliceLen(columns, int(colNum))
 	for i := 0; i < int(colNum); i++ {
-		b, err := rd.ReadSlice(0)
+		columns[i], err = readBytes(cn, columns[i][:0])
 		if err != nil {
 			return nil, err
 		}
-		columns[i] = append(columns[i][:0], b[:len(b)-1]...)
-
-		_, err = rd.ReadN(18)
-		if err != nil {
+		if _, err := cn.ReadN(18); err != nil {
 			return nil, err
 		}
 	}
@@ -598,22 +565,22 @@ func setByteSliceLen(b [][]byte, n int) [][]byte {
 	return b
 }
 
-func readDataRow(rd *pool.Reader, scanner orm.ColumnScanner, columns [][]byte) error {
-	colNum, err := rd.ReadInt16()
+func readDataRow(cn *pool.Conn, scanner orm.ColumnScanner, columns [][]byte) error {
+	colNum, err := readInt16(cn)
 	if err != nil {
 		return err
 	}
 
 	var firstErr error
 	for colIdx := int16(0); colIdx < colNum; colIdx++ {
-		l, err := rd.ReadInt32()
+		l, err := readInt32(cn)
 		if err != nil {
 			return err
 		}
 
 		var b []byte
 		if l != -1 { // NULL
-			b, err = rd.ReadN(int(l))
+			b, err = cn.ReadN(int(l))
 			if err != nil {
 				return err
 			}
@@ -638,18 +605,18 @@ func newModel(mod interface{}) (orm.Model, error) {
 	return m, m.Init()
 }
 
-func readSimpleQueryData(rd *pool.Reader, mod interface{}) (*result, error) {
+func readSimpleQueryData(cn *pool.Conn, mod interface{}) (*result, error) {
 	var res result
 	var firstErr error
 	for {
-		c, msgLen, err := rd.ReadMessageType()
+		c, msgLen, err := readMessageType(cn)
 		if err != nil {
 			return nil, err
 		}
 
 		switch c {
 		case rowDescriptionMsg:
-			rd.Columns, err = readRowDescription(rd, rd.Columns[:0])
+			cn.Columns, err = readRowDescription(cn, cn.Columns[:0])
 			if err != nil {
 				return nil, err
 			}
@@ -666,7 +633,7 @@ func readSimpleQueryData(rd *pool.Reader, mod interface{}) (*result, error) {
 			}
 		case dataRowMsg:
 			m := res.model.NewModel()
-			if err := readDataRow(rd, m, rd.Columns); err != nil {
+			if err := readDataRow(cn, m, cn.Columns); err != nil {
 				if firstErr == nil {
 					firstErr = err
 				}
@@ -678,7 +645,7 @@ func readSimpleQueryData(rd *pool.Reader, mod interface{}) (*result, error) {
 
 			res.returned++
 		case commandCompleteMsg:
-			b, err := rd.ReadN(msgLen)
+			b, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
@@ -686,7 +653,7 @@ func readSimpleQueryData(rd *pool.Reader, mod interface{}) (*result, error) {
 				firstErr = err
 			}
 		case readyForQueryMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
@@ -695,7 +662,7 @@ func readSimpleQueryData(rd *pool.Reader, mod interface{}) (*result, error) {
 			}
 			return &res, nil
 		case errorResponseMsg:
-			e, err := rd.ReadError()
+			e, err := readError(cn)
 			if err != nil {
 				return nil, err
 			}
@@ -707,11 +674,11 @@ func readSimpleQueryData(rd *pool.Reader, mod interface{}) (*result, error) {
 				firstErr = errEmptyQuery
 			}
 		case noticeResponseMsg:
-			if err := logNotice(rd, msgLen); err != nil {
+			if err := logNotice(cn, msgLen); err != nil {
 				return nil, err
 			}
 		case parameterStatusMsg:
-			if err := logParameterStatus(rd, msgLen); err != nil {
+			if err := logParameterStatus(cn, msgLen); err != nil {
 				return nil, err
 			}
 		default:
@@ -720,18 +687,18 @@ func readSimpleQueryData(rd *pool.Reader, mod interface{}) (*result, error) {
 	}
 }
 
-func readExtQueryData(rd *pool.Reader, mod interface{}, columns [][]byte) (*result, error) {
+func readExtQueryData(cn *pool.Conn, mod interface{}, columns [][]byte) (*result, error) {
 	var res result
 	var firstErr error
 	for {
-		c, msgLen, err := rd.ReadMessageType()
+		c, msgLen, err := readMessageType(cn)
 		if err != nil {
 			return nil, err
 		}
 
 		switch c {
 		case bindCompleteMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
@@ -748,7 +715,7 @@ func readExtQueryData(rd *pool.Reader, mod interface{}, columns [][]byte) (*resu
 			}
 
 			m := res.model.NewModel()
-			if err := readDataRow(rd, m, columns); err != nil {
+			if err := readDataRow(cn, m, columns); err != nil {
 				if firstErr == nil {
 					firstErr = err
 				}
@@ -760,7 +727,7 @@ func readExtQueryData(rd *pool.Reader, mod interface{}, columns [][]byte) (*resu
 
 			res.returned++
 		case commandCompleteMsg: // Response to the EXECUTE message.
-			b, err := rd.ReadN(msgLen)
+			b, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
@@ -768,7 +735,7 @@ func readExtQueryData(rd *pool.Reader, mod interface{}, columns [][]byte) (*resu
 				firstErr = err
 			}
 		case readyForQueryMsg: // Response to the SYNC message.
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
@@ -777,7 +744,7 @@ func readExtQueryData(rd *pool.Reader, mod interface{}, columns [][]byte) (*resu
 			}
 			return &res, nil
 		case errorResponseMsg:
-			e, err := rd.ReadError()
+			e, err := readError(cn)
 			if err != nil {
 				return nil, err
 			}
@@ -785,11 +752,11 @@ func readExtQueryData(rd *pool.Reader, mod interface{}, columns [][]byte) (*resu
 				firstErr = e
 			}
 		case noticeResponseMsg:
-			if err := logNotice(rd, msgLen); err != nil {
+			if err := logNotice(cn, msgLen); err != nil {
 				return nil, err
 			}
 		case parameterStatusMsg:
-			if err := logParameterStatus(rd, msgLen); err != nil {
+			if err := logParameterStatus(cn, msgLen); err != nil {
 				return nil, err
 			}
 		default:
@@ -798,20 +765,20 @@ func readExtQueryData(rd *pool.Reader, mod interface{}, columns [][]byte) (*resu
 	}
 }
 
-func readCopyInResponse(rd *pool.Reader) error {
+func readCopyInResponse(cn *pool.Conn) error {
 	var firstErr error
 	for {
-		c, msgLen, err := rd.ReadMessageType()
+		c, msgLen, err := readMessageType(cn)
 		if err != nil {
 			return err
 		}
 
 		switch c {
 		case copyInResponseMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			return err
 		case errorResponseMsg:
-			e, err := rd.ReadError()
+			e, err := readError(cn)
 			if err != nil {
 				return err
 			}
@@ -819,17 +786,17 @@ func readCopyInResponse(rd *pool.Reader) error {
 				firstErr = e
 			}
 		case readyForQueryMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return err
 			}
 			return firstErr
 		case noticeResponseMsg:
-			if err := logNotice(rd, msgLen); err != nil {
+			if err := logNotice(cn, msgLen); err != nil {
 				return err
 			}
 		case parameterStatusMsg:
-			if err := logParameterStatus(rd, msgLen); err != nil {
+			if err := logParameterStatus(cn, msgLen); err != nil {
 				return err
 			}
 		default:
@@ -838,20 +805,20 @@ func readCopyInResponse(rd *pool.Reader) error {
 	}
 }
 
-func readCopyOutResponse(rd *pool.Reader) error {
+func readCopyOutResponse(cn *pool.Conn) error {
 	var firstErr error
 	for {
-		c, msgLen, err := rd.ReadMessageType()
+		c, msgLen, err := readMessageType(cn)
 		if err != nil {
 			return err
 		}
 
 		switch c {
 		case copyOutResponseMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			return err
 		case errorResponseMsg:
-			e, err := rd.ReadError()
+			e, err := readError(cn)
 			if err != nil {
 				return err
 			}
@@ -859,17 +826,17 @@ func readCopyOutResponse(rd *pool.Reader) error {
 				firstErr = e
 			}
 		case readyForQueryMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return err
 			}
 			return firstErr
 		case noticeResponseMsg:
-			if err := logNotice(rd, msgLen); err != nil {
+			if err := logNotice(cn, msgLen); err != nil {
 				return err
 			}
 		case parameterStatusMsg:
-			if err := logParameterStatus(rd, msgLen); err != nil {
+			if err := logParameterStatus(cn, msgLen); err != nil {
 				return err
 			}
 		default:
@@ -878,18 +845,18 @@ func readCopyOutResponse(rd *pool.Reader) error {
 	}
 }
 
-func readCopyData(rd *pool.Reader, w io.Writer) (*result, error) {
+func readCopyData(cn *pool.Conn, w io.Writer) (*result, error) {
 	var res result
 	var firstErr error
 	for {
-		c, msgLen, err := rd.ReadMessageType()
+		c, msgLen, err := readMessageType(cn)
 		if err != nil {
 			return nil, err
 		}
 
 		switch c {
 		case copyDataMsg:
-			b, err := rd.ReadN(msgLen)
+			b, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
@@ -899,12 +866,12 @@ func readCopyData(rd *pool.Reader, w io.Writer) (*result, error) {
 				return nil, err
 			}
 		case copyDoneMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
 		case commandCompleteMsg:
-			b, err := rd.ReadN(msgLen)
+			b, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
@@ -912,7 +879,7 @@ func readCopyData(rd *pool.Reader, w io.Writer) (*result, error) {
 				firstErr = err
 			}
 		case readyForQueryMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
@@ -921,17 +888,17 @@ func readCopyData(rd *pool.Reader, w io.Writer) (*result, error) {
 			}
 			return &res, nil
 		case errorResponseMsg:
-			e, err := rd.ReadError()
+			e, err := readError(cn)
 			if err != nil {
 				return nil, err
 			}
 			return nil, e
 		case noticeResponseMsg:
-			if err := logNotice(rd, msgLen); err != nil {
+			if err := logNotice(cn, msgLen); err != nil {
 				return nil, err
 			}
 		case parameterStatusMsg:
-			if err := logParameterStatus(rd, msgLen); err != nil {
+			if err := logParameterStatus(cn, msgLen); err != nil {
 				return nil, err
 			}
 		default:
@@ -952,18 +919,18 @@ func writeCopyDone(buf *pool.WriteBuffer) {
 	buf.FinishMessage()
 }
 
-func readReadyForQuery(rd *pool.Reader) (*result, error) {
+func readReadyForQuery(cn *pool.Conn) (*result, error) {
 	var res result
 	var firstErr error
 	for {
-		c, msgLen, err := rd.ReadMessageType()
+		c, msgLen, err := readMessageType(cn)
 		if err != nil {
 			return nil, err
 		}
 
 		switch c {
 		case commandCompleteMsg:
-			b, err := rd.ReadN(msgLen)
+			b, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
@@ -971,7 +938,7 @@ func readReadyForQuery(rd *pool.Reader) (*result, error) {
 				firstErr = err
 			}
 		case readyForQueryMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return nil, err
 			}
@@ -980,7 +947,7 @@ func readReadyForQuery(rd *pool.Reader) (*result, error) {
 			}
 			return &res, nil
 		case errorResponseMsg:
-			e, err := rd.ReadError()
+			e, err := readError(cn)
 			if err != nil {
 				return nil, err
 			}
@@ -988,11 +955,11 @@ func readReadyForQuery(rd *pool.Reader) (*result, error) {
 				firstErr = e
 			}
 		case noticeResponseMsg:
-			if err := logNotice(rd, msgLen); err != nil {
+			if err := logNotice(cn, msgLen); err != nil {
 				return nil, err
 			}
 		case parameterStatusMsg:
-			if err := logParameterStatus(rd, msgLen); err != nil {
+			if err := logParameterStatus(cn, msgLen); err != nil {
 				return nil, err
 			}
 		default:
@@ -1001,44 +968,44 @@ func readReadyForQuery(rd *pool.Reader) (*result, error) {
 	}
 }
 
-func readNotification(rd *pool.Reader) (channel, payload string, err error) {
+func readNotification(cn *pool.Conn) (channel, payload string, err error) {
 	for {
-		c, msgLen, err := rd.ReadMessageType()
+		c, msgLen, err := readMessageType(cn)
 		if err != nil {
 			return "", "", err
 		}
 
 		switch c {
 		case commandCompleteMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return "", "", err
 			}
 		case readyForQueryMsg:
-			_, err := rd.ReadN(msgLen)
+			_, err := cn.ReadN(msgLen)
 			if err != nil {
 				return "", "", err
 			}
 		case errorResponseMsg:
-			e, err := rd.ReadError()
+			e, err := readError(cn)
 			if err != nil {
 				return "", "", err
 			}
 			return "", "", e
 		case noticeResponseMsg:
-			if err := logNotice(rd, msgLen); err != nil {
+			if err := logNotice(cn, msgLen); err != nil {
 				return "", "", err
 			}
 		case notificationResponseMsg:
-			_, err := rd.ReadInt32()
+			_, err := readInt32(cn)
 			if err != nil {
 				return "", "", err
 			}
-			channel, err = rd.ReadString()
+			channel, err = readString(cn)
 			if err != nil {
 				return "", "", err
 			}
-			payload, err = rd.ReadString()
+			payload, err = readString(cn)
 			if err != nil {
 				return "", "", err
 			}
@@ -1059,12 +1026,84 @@ func terminateConn(cn *pool.Conn) error {
 
 //------------------------------------------------------------------------------
 
-func logNotice(rd *pool.Reader, msgLen int) error {
-	_, err := rd.ReadN(msgLen)
+func readInt16(cn *pool.Conn) (int16, error) {
+	b, err := cn.ReadN(2)
+	if err != nil {
+		return 0, err
+	}
+	return int16(binary.BigEndian.Uint16(b)), nil
+}
+
+func readInt32(cn *pool.Conn) (int32, error) {
+	b, err := cn.ReadN(4)
+	if err != nil {
+		return 0, err
+	}
+	return int32(binary.BigEndian.Uint32(b)), nil
+}
+
+func readString(cn *pool.Conn) (string, error) {
+	s, err := cn.Reader.ReadString(0)
+	if err != nil {
+		return "", err
+	}
+	return s[:len(s)-1], nil
+}
+
+func readBytes(cn *pool.Conn, b []byte) ([]byte, error) {
+	for {
+		line, err := cn.Reader.ReadSlice(0)
+		if err != nil && err != bufio.ErrBufferFull {
+			return nil, err
+		}
+		b = append(b, line...)
+		if err == nil {
+			break
+		}
+	}
+	return b[:len(b)-1], nil
+}
+
+func readError(cn *pool.Conn) (error, error) {
+	m := map[byte]string{
+		'a': cn.RemoteAddr().String(),
+	}
+	for {
+		c, err := cn.Reader.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		if c == 0 {
+			break
+		}
+		s, err := readString(cn)
+		if err != nil {
+			return nil, err
+		}
+		m[c] = s
+	}
+
+	return internal.NewPGError(m), nil
+}
+
+func readMessageType(cn *pool.Conn) (byte, int, error) {
+	c, err := cn.Reader.ReadByte()
+	if err != nil {
+		return 0, 0, err
+	}
+	l, err := readInt32(cn)
+	if err != nil {
+		return 0, 0, err
+	}
+	return c, int(l) - 4, nil
+}
+
+func logNotice(cn *pool.Conn, msgLen int) error {
+	_, err := cn.ReadN(msgLen)
 	return err
 }
 
-func logParameterStatus(rd *pool.Reader, msgLen int) error {
-	_, err := rd.ReadN(msgLen)
+func logParameterStatus(cn *pool.Conn, msgLen int) error {
+	_, err := cn.ReadN(msgLen)
 	return err
 }

@@ -13,7 +13,7 @@ type tableModel interface {
 	Relation() *Relation
 	AppendParam([]byte, QueryFormatter, string) ([]byte, bool)
 
-	Join(string, func(*Query) (*Query, error)) *join
+	Join(string, func(*Query) (*Query, error)) (bool, *join)
 	GetJoin(string) *join
 	GetJoins() []join
 	AddJoin(join) *join
@@ -25,7 +25,6 @@ type tableModel interface {
 	Kind() reflect.Kind
 	Value() reflect.Value
 
-	setDeletedAt()
 	scanColumn(int, string, []byte) (bool, error)
 }
 

@@ -8,32 +8,27 @@ import (
 )
 
 type join struct {
-	Parent    *join
-	BaseModel tableModel
-	JoinModel tableModel
-	Rel       *Relation
-
+	Parent     *join
+	BaseModel  tableModel
+	JoinModel  tableModel
+	Rel        *Relation
 	ApplyQuery func(*Query) (*Query, error)
-	Columns    []string
-	on         []*condAppender
+
+	Columns []string
 }
 
-func (j *join) AppendOn(app *condAppender) {
-	j.on = append(j.on, app)
-}
-
-func (j *join) Select(q *Query) error {
+func (j *join) Select(db DB) error {
 	switch j.Rel.Type {
 	case HasManyRelation:
-		return j.selectMany(q)
+		return j.selectMany(db)
 	case Many2ManyRelation:
-		return j.selectM2M(q)
+		return j.selectM2M(db)
 	}
 	panic("not reached")
 }
 
-func (j *join) selectMany(q *Query) error {
-	q, err := j.manyQuery(q)
+func (j *join) selectMany(db DB) error {
+	q, err := j.manyQuery(db)
 	if err != nil {
 		return err
 	}
@@ -43,13 +38,13 @@ func (j *join) selectMany(q *Query) error {
 	return q.Select()
 }
 
-func (j *join) manyQuery(q *Query) (*Query, error) {
+func (j *join) manyQuery(db DB) (*Query, error) {
 	manyModel := newManyModel(j)
 	if manyModel == nil {
 		return nil, nil
 	}
 
-	q = q.Model(manyModel)
+	q := NewQuery(db, manyModel)
 	if j.ApplyQuery != nil {
 		var err error
 		q, err = j.ApplyQuery(q)
@@ -78,16 +73,18 @@ func (j *join) manyQuery(q *Query) (*Query, error) {
 	q = q.Where(internal.BytesToString(where))
 
 	if j.Rel.Polymorphic != nil {
-		q = q.Where(`? IN (?, ?)`,
+		q = q.Where(
+			`? IN (?, ?)`,
 			j.Rel.Polymorphic.Column,
-			baseTable.ModelName, baseTable.TypeName)
+			baseTable.ModelName, baseTable.TypeName,
+		)
 	}
 
 	return q, nil
 }
 
-func (j *join) selectM2M(q *Query) error {
-	q, err := j.m2mQuery(q)
+func (j *join) selectM2M(db DB) error {
+	q, err := j.m2mQuery(db)
 	if err != nil {
 		return err
 	}
@@ -97,13 +94,13 @@ func (j *join) selectM2M(q *Query) error {
 	return q.Select()
 }
 
-func (j *join) m2mQuery(q *Query) (*Query, error) {
+func (j *join) m2mQuery(db DB) (*Query, error) {
 	m2mModel := newM2MModel(j)
 	if m2mModel == nil {
 		return nil, nil
 	}
 
-	q = q.Model(m2mModel)
+	q := NewQuery(db, m2mModel)
 	if j.ApplyQuery != nil {
 		var err error
 		q, err = j.ApplyQuery(q)
@@ -120,7 +117,11 @@ func (j *join) m2mQuery(q *Query) (*Query, error) {
 	baseTable := j.BaseModel.Table()
 	var join []byte
 	join = append(join, "JOIN "...)
-	join = q.FormatQuery(join, string(j.Rel.M2MTableName))
+	if db != nil {
+		join = db.FormatQuery(join, string(j.Rel.M2MTableName))
+	} else {
+		join = append(join, j.Rel.M2MTableName...)
+	}
 	join = append(join, " AS "...)
 	join = append(join, j.Rel.M2MTableAlias...)
 	join = append(join, " ON ("...)
@@ -143,9 +144,11 @@ func (j *join) m2mQuery(q *Query) (*Query, error) {
 			break
 		}
 		pk := joinTable.PKs[i]
-		q = q.Where("?.? = ?.?",
+		q = q.Where(
+			"?.? = ?.?",
 			joinTable.Alias, pk.Column,
-			j.Rel.M2MTableAlias, types.F(col))
+			j.Rel.M2MTableAlias, types.F(col),
+		)
 	}
 
 	return q, nil
@@ -228,17 +231,17 @@ func (j *join) appendHasOneColumns(b []byte) []byte {
 	return b
 }
 
-func (j *join) appendHasOneJoin(q *Query, b []byte) []byte {
+func (j *join) appendHasOneJoin(db DB, b []byte) []byte {
 	b = append(b, "LEFT JOIN "...)
-	b = q.FormatQuery(b, string(j.JoinModel.Table().NameForSelects))
+	if db != nil {
+		b = db.FormatQuery(b, string(j.JoinModel.Table().Name))
+	} else {
+		b = append(b, j.JoinModel.Table().Name...)
+	}
 	b = append(b, " AS "...)
 	b = j.appendAlias(b)
 
 	b = append(b, " ON "...)
-
-	if len(j.Rel.FKs) > 1 {
-		b = append(b, '(')
-	}
 	if j.Rel.Type == HasOneRelation {
 		joinTable := j.Rel.JoinTable
 		for i, fk := range j.Rel.FKs {
@@ -267,20 +270,6 @@ func (j *join) appendHasOneJoin(q *Query, b []byte) []byte {
 			b = append(b, '.')
 			b = append(b, baseTable.PKs[i].Column...)
 		}
-	}
-	if len(j.Rel.FKs) > 1 {
-		b = append(b, ')')
-	}
-
-	for _, on := range j.on {
-		b = on.AppendSep(b)
-		b = on.AppendFormat(b, q)
-	}
-
-	if q.softDelete() {
-		b = append(b, " AND "...)
-		b = j.appendBaseAlias(b)
-		b = q.appendSoftDelete(b)
 	}
 
 	return b

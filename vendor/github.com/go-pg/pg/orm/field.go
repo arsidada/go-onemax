@@ -66,11 +66,12 @@ func (f *Field) Value(strct reflect.Value) reflect.Value {
 }
 
 func (f *Field) IsZero(strct reflect.Value) bool {
-	return f.isZero(f.Value(strct))
+	fv := f.Value(strct)
+	return f.isZero(fv)
 }
 
-func (f *Field) OmitZero() bool {
-	return !f.HasFlag(NotNullFlag)
+func (f *Field) OmitZero(strct reflect.Value) bool {
+	return (f.Default != "" || !f.HasFlag(NotNullFlag)) && f.isZero(f.Value(strct))
 }
 
 func (f *Field) AppendValue(b []byte, strct reflect.Value, quote int) []byte {

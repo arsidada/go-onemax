@@ -1,9 +1,6 @@
 package orm
 
-import (
-	"reflect"
-	"time"
-)
+import "reflect"
 
 type sliceTableModel struct {
 	structTableModel
@@ -33,7 +30,7 @@ func (m *sliceTableModel) AppendParam(b []byte, f QueryFormatter, name string) (
 	return m.structTableModel.AppendParam(b, f, name)
 }
 
-func (m *sliceTableModel) Join(name string, apply func(*Query) (*Query, error)) *join {
+func (m *sliceTableModel) Join(name string, apply func(*Query) (*Query, error)) (bool, *join) {
 	return m.join(m.Value(), name, apply)
 }
 
@@ -59,6 +56,7 @@ func (m *sliceTableModel) Init() error {
 func (m *sliceTableModel) NewModel() ColumnScanner {
 	m.strct = m.nextElem()
 	m.structInited = false
+	m.structTableModel.NewModel()
 	return m
 }
 
@@ -139,14 +137,4 @@ func (m *sliceTableModel) nextElem() reflect.Value {
 
 	m.slice.Set(reflect.Append(m.slice, m.table.zeroStruct))
 	return m.slice.Index(m.slice.Len() - 1)
-}
-
-func (m *sliceTableModel) setDeletedAt() {
-	field := m.table.FieldsMap["deleted_at"]
-	now := time.Now()
-	for i := 0; i < m.slice.Len(); i++ {
-		strct := indirect(m.slice.Index(i))
-		value := field.Value(strct)
-		value.Set(reflect.ValueOf(now))
-	}
 }

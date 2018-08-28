@@ -1,17 +1,11 @@
 package orm
 
-import (
-	"reflect"
-)
+import "reflect"
 
 type hookStubs struct{}
 
 func (hookStubs) AfterQuery(_ DB) error {
 	return nil
-}
-
-func (hookStubs) BeforeSelectQuery(db DB, q *Query) (*Query, error) {
-	return q, nil
 }
 
 func (hookStubs) AfterSelect(_ DB) error {
@@ -58,8 +52,6 @@ func callHookSlice(slice reflect.Value, ptr bool, db DB, hook func(reflect.Value
 	return firstErr
 }
 
-//------------------------------------------------------------------------------
-
 type afterQueryHook interface {
 	AfterQuery(db DB) error
 }
@@ -73,20 +65,6 @@ func callAfterQueryHook(v reflect.Value, db DB) error {
 func callAfterQueryHookSlice(slice reflect.Value, ptr bool, db DB) error {
 	return callHookSlice(slice, ptr, db, callAfterQueryHook)
 }
-
-//------------------------------------------------------------------------------
-
-type beforeSelectQueryHook interface {
-	BeforeSelectQuery(db DB, q *Query) (*Query, error)
-}
-
-var beforeSelectQueryHookType = reflect.TypeOf((*beforeSelectQueryHook)(nil)).Elem()
-
-func callBeforeSelectQueryHook(v reflect.Value, db DB, q *Query) (*Query, error) {
-	return v.Interface().(beforeSelectQueryHook).BeforeSelectQuery(db, q)
-}
-
-//------------------------------------------------------------------------------
 
 type afterSelectHook interface {
 	AfterSelect(db DB) error
@@ -102,8 +80,6 @@ func callAfterSelectHookSlice(slice reflect.Value, ptr bool, db DB) error {
 	return callHookSlice(slice, ptr, db, callAfterSelectHook)
 }
 
-//------------------------------------------------------------------------------
-
 type beforeInsertHook interface {
 	BeforeInsert(db DB) error
 }
@@ -117,8 +93,6 @@ func callBeforeInsertHook(v reflect.Value, db DB) error {
 func callBeforeInsertHookSlice(slice reflect.Value, ptr bool, db DB) error {
 	return callHookSlice(slice, ptr, db, callBeforeInsertHook)
 }
-
-//------------------------------------------------------------------------------
 
 type afterInsertHook interface {
 	AfterInsert(db DB) error
@@ -134,8 +108,6 @@ func callAfterInsertHookSlice(slice reflect.Value, ptr bool, db DB) error {
 	return callHookSlice(slice, ptr, db, callAfterInsertHook)
 }
 
-//------------------------------------------------------------------------------
-
 type beforeUpdateHook interface {
 	BeforeUpdate(db DB) error
 }
@@ -149,8 +121,6 @@ func callBeforeUpdateHook(v reflect.Value, db DB) error {
 func callBeforeUpdateHookSlice(slice reflect.Value, ptr bool, db DB) error {
 	return callHookSlice(slice, ptr, db, callBeforeUpdateHook)
 }
-
-//------------------------------------------------------------------------------
 
 type afterUpdateHook interface {
 	AfterUpdate(db DB) error
@@ -166,8 +136,6 @@ func callAfterUpdateHookSlice(slice reflect.Value, ptr bool, db DB) error {
 	return callHookSlice(slice, ptr, db, callAfterUpdateHook)
 }
 
-//------------------------------------------------------------------------------
-
 type beforeDeleteHook interface {
 	BeforeDelete(db DB) error
 }
@@ -181,8 +149,6 @@ func callBeforeDeleteHook(v reflect.Value, db DB) error {
 func callBeforeDeleteHookSlice(slice reflect.Value, ptr bool, db DB) error {
 	return callHookSlice(slice, ptr, db, callBeforeDeleteHook)
 }
-
-//------------------------------------------------------------------------------
 
 type afterDeleteHook interface {
 	AfterDelete(db DB) error

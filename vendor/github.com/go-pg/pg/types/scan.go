@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"time"
 
 	"github.com/go-pg/pg/internal"
@@ -30,7 +31,7 @@ func Scan(v interface{}, b []byte) error {
 			return nil
 		}
 		var err error
-		*v, err = internal.Atoi(b)
+		*v, err = strconv.Atoi(internal.BytesToString(b))
 		return err
 	case *int64:
 		if b == nil {
@@ -38,7 +39,7 @@ func Scan(v interface{}, b []byte) error {
 			return nil
 		}
 		var err error
-		*v, err = internal.ParseInt(b, 10, 64)
+		*v, err = strconv.ParseInt(internal.BytesToString(b), 10, 64)
 		return err
 	case *time.Time:
 		if b == nil {

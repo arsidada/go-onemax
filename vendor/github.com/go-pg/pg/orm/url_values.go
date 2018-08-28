@@ -33,23 +33,8 @@ func (v URLValues) String(name string) string {
 	return values[0]
 }
 
-func (v URLValues) Bool(name string) (bool, error) {
-	if !v.Has(name) {
-		return false, nil
-	}
-	s := v.String(name)
-	if s == "" {
-		return true, nil
-	}
-	return strconv.ParseBool(s)
-}
-
 func (v URLValues) Int(name string) (int, error) {
-	s := v.String(name)
-	if s == "" {
-		return 0, nil
-	}
-	return strconv.Atoi(s)
+	return strconv.Atoi(v.String(name))
 }
 
 func (v URLValues) MaybeInt(name string) int {

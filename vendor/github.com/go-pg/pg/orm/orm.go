@@ -31,7 +31,6 @@ type DB interface {
 	Insert(model ...interface{}) error
 	Update(model interface{}) error
 	Delete(model interface{}) error
-	ForceDelete(model interface{}) error
 
 	Exec(query interface{}, params ...interface{}) (Result, error)
 	ExecOne(query interface{}, params ...interface{}) (Result, error)

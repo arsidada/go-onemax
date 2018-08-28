@@ -128,8 +128,10 @@ func (r AsciiJSON) Render(w http.ResponseWriter) (err error) {
 
 	var buffer bytes.Buffer
 	for _, r := range string(ret) {
-		cvt := string(r)
-		if r >= 128 {
+		cvt := ""
+		if r < 128 {
+			cvt = string(r)
+		} else {
 			cvt = fmt.Sprintf("\\u%04x", int64(r))
 		}
 		buffer.WriteString(cvt)

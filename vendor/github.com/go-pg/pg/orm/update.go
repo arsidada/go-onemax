@@ -57,7 +57,7 @@ func (q updateQuery) AppendQuery(b []byte) ([]byte, error) {
 	}
 
 	isSliceModel := q.q.isSliceModel()
-	if q.q.hasMultiTables() || isSliceModel {
+	if q.q.hasOtherTables() || isSliceModel {
 		b = append(b, " FROM "...)
 		b = q.q.appendOtherTables(b)
 
@@ -74,7 +74,7 @@ func (q updateQuery) AppendQuery(b []byte) ([]byte, error) {
 		table := q.q.model.Table()
 		b = appendWhereColumnAndColumn(b, table.Alias, table.PKs)
 
-		if q.q.hasWhere() {
+		if len(q.q.where) > 0 {
 			b = append(b, " AND "...)
 			b = q.q.appendWhere(b)
 		}
@@ -134,7 +134,7 @@ func (q updateQuery) appendSetStruct(b []byte, strct reflect.Value) ([]byte, err
 
 	pos := len(b)
 	for _, f := range fields {
-		omitZero := f.OmitZero() && f.IsZero(strct)
+		omitZero := f.OmitZero(strct)
 		if omitZero && q.omitZero {
 			continue
 		}
@@ -153,7 +153,7 @@ func (q updateQuery) appendSetStruct(b []byte, strct reflect.Value) ([]byte, err
 			continue
 		}
 
-		if f.OmitZero() && f.IsZero(strct) {
+		if f.OmitZero(strct) {
 			b = append(b, "NULL"...)
 		} else {
 			b = f.AppendValue(b, strct, 1)
@@ -229,7 +229,7 @@ func (q updateQuery) appendValues(b []byte, fields []*Field, strct reflect.Value
 			continue
 		}
 
-		if f.OmitZero() && f.IsZero(strct) {
+		if f.OmitZero(strct) {
 			b = append(b, "NULL"...)
 		} else {
 			b = f.AppendValue(b, strct, 1)

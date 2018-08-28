@@ -16,7 +16,6 @@ import (
 
 const (
 	AfterQueryHookFlag = uint16(1) << iota
-	BeforeSelectQueryHookFlag
 	AfterSelectHookFlag
 	BeforeInsertHookFlag
 	AfterInsertHookFlag
@@ -25,7 +24,6 @@ const (
 	BeforeDeleteHookFlag
 	AfterDeleteHookFlag
 	discardUnknownColumns
-	softDelete
 )
 
 var timeType = reflect.TypeOf((*time.Time)(nil)).Elem()
@@ -42,11 +40,10 @@ type Table struct {
 	Type       reflect.Type
 	zeroStruct reflect.Value
 
-	TypeName       string
-	Name           types.Q
-	NameForSelects types.Q
-	Alias          types.Q
-	ModelName      string
+	TypeName  string
+	Name      types.Q
+	Alias     types.Q
+	ModelName string
 
 	allFields     []*Field // read only
 	skippedFields []*Field
@@ -63,27 +60,18 @@ type Table struct {
 	flags uint16
 }
 
-func (t *Table) setName(name types.Q) {
-	t.Name = name
-	t.NameForSelects = name
-}
-
 func newTable(typ reflect.Type) *Table {
 	t := new(Table)
 	t.Type = typ
-	t.zeroStruct = reflect.New(t.Type).Elem()
+	t.zeroStruct = reflect.Zero(t.Type)
 	t.TypeName = internal.ToExported(t.Type.Name())
 	t.ModelName = internal.Underscore(t.Type.Name())
-	tableName := quoteTableName(tableNameInflector(t.ModelName))
-	t.setName(types.Q(types.AppendField(nil, tableName, 1)))
+	t.Name = types.Q(types.AppendField(nil, tableNameInflector(t.ModelName), 1))
 	t.Alias = types.Q(types.AppendField(nil, t.ModelName, 1))
 
 	typ = reflect.PtrTo(t.Type)
 	if typ.Implements(afterQueryHookType) {
 		t.SetFlag(AfterQueryHookFlag)
-	}
-	if typ.Implements(beforeSelectQueryHookType) {
-		t.SetFlag(BeforeSelectQueryHookFlag)
 	}
 	if typ.Implements(afterSelectHookType) {
 		t.SetFlag(AfterSelectHookFlag)
@@ -135,14 +123,7 @@ func (t *Table) HasField(field string) bool {
 
 func (t *Table) checkPKs() error {
 	if len(t.PKs) == 0 {
-		return fmt.Errorf("pg: %s does not have primary keys", t)
-	}
-	return nil
-}
-
-func (t *Table) mustSoftDelete() error {
-	if !t.HasFlag(softDelete) {
-		return fmt.Errorf("pg: %s does not support soft deletes", t)
+		return fmt.Errorf("%s does not have primary keys", t)
 	}
 	return nil
 }
@@ -225,13 +206,10 @@ func (t *Table) addFields(typ reflect.Type, baseIndex []int) {
 			t.addFields(fieldType, append(index, f.Index...))
 
 			pgTag := parseTag(f.Tag.Get("pg"))
-			_, inherit := pgTag.Options["inherit"]
-			_, override := pgTag.Options["override"]
-			if inherit || override {
+			if _, ok := pgTag.Options["override"]; ok {
 				embeddedTable := newTable(fieldType)
 				t.TypeName = embeddedTable.TypeName
 				t.Name = embeddedTable.Name
-				t.NameForSelects = embeddedTable.NameForSelects
 				t.Alias = embeddedTable.Alias
 				t.ModelName = embeddedTable.ModelName
 			}
@@ -256,18 +234,15 @@ func (t *Table) newField(f reflect.StructField, index []int) *Field {
 		}
 
 		if sqlTag.Name != "" {
+			if isPostgresKeyword(sqlTag.Name) {
+				sqlTag.Name = `"` + sqlTag.Name + `"`
+			}
 			s, _ := unquoteTagValue(sqlTag.Name)
-			t.setName(types.Q(quoteTableName(s)))
+			t.Name = types.Q(s)
 		}
 
-		if v, ok := sqlTag.Options["select"]; ok {
-			v, _ = unquoteTagValue(v)
-			t.NameForSelects = types.Q(quoteTableName(v))
-		}
-
-		if v, ok := sqlTag.Options["alias"]; ok {
-			v, _ = unquoteTagValue(v)
-			t.Alias = types.Q(quoteTableName(v))
+		if alias, ok := sqlTag.Options["alias"]; ok {
+			t.Alias = types.Q(alias)
 		}
 
 		pgTag := parseTag(f.Tag.Get("pg"))
@@ -357,11 +332,7 @@ func (t *Table) newField(f reflect.StructField, index []int) *Field {
 		field.OnDelete = v
 	}
 
-	if v, ok := sqlTag.Options["composite"]; ok {
-		field.SQLType = v
-		field.append = compositeAppender(f.Type)
-		field.scan = compositeScanner(f.Type)
-	} else if _, ok := pgTag.Options["json_use_number"]; ok {
+	if _, ok := pgTag.Options["json_use_number"]; ok {
 		field.append = types.Appender(f.Type)
 		field.scan = scanJSONValue
 	} else if field.HasFlag(ArrayFlag) {
@@ -381,14 +352,6 @@ func (t *Table) newField(f reflect.StructField, index []int) *Field {
 		t.FieldsMap[field.SQLName] = field
 		return nil
 	}
-
-	switch field.SQLName {
-	case "deleted_at":
-		if _, ok := pgTag.Options["soft_delete"]; ok && field.Type == timeType {
-			t.SetFlag(softDelete)
-		}
-	}
-
 	return field
 }
 
@@ -870,13 +833,6 @@ func tryUnderscorePrefix(s string) string {
 	}
 	if c := s[0]; internal.IsUpper(c) {
 		return internal.Underscore(s) + "_"
-	}
-	return s
-}
-
-func quoteTableName(s string) string {
-	if isPostgresKeyword(s) {
-		return `"` + s + `"`
 	}
 	return s
 }
