@@ -35,4 +35,4 @@
   
 - Push to the heroku app by performing the following:
 
-  `git push herkou master`
+  `git push heroku master`
