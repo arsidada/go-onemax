@@ -1,5 +1,20 @@
 # Go backend for OneMAX.org
 
+## Overview
+
+App can be found here: https://fierce-everglades-88127.herokuapp.com/
+
+This app currently handles the following APIs:
+
+    1. /submitted_nominees - GET
+    - returns all nominees that have a status='submitted'
+
+    2. /approve_nominee/:ID - POST
+    - changes the status of a nominee from submitted to approved given an ID param in the URL
+
+    3. /reject_nominee/:ID - POST
+    - same as approve but changes status to rejected
+
 ## Development Instructions
 
 - Ensure that you have Go installed
