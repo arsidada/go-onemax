@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"github.com/go-pg/pg"
 	"os"
+  "fmt"
 	// "github.com/go-pg/pg/orm"
 )
 
@@ -18,6 +19,16 @@ type Nomination struct {
 	Image       string
 	Duas        int
 }
+
+type Comment struct {
+	ID          int
+	Nomineeid   int
+	Userid      int
+	Content     string
+	Createdat   string
+}
+
+
 
 // Global var to hold the database object
 var db *pg.DB
@@ -54,6 +65,30 @@ func GetSubmittedNomineesFromDB() ([]Nomination, error) {
 	}
 
 	return result, nil
+}
+
+func GetCommentsFromDB(NomineeID int) ([]Comment, error) {
+	result := make([]Comment, 0)
+	err := db.Model(&result).
+		Where("nomineeid = ?", NomineeID).
+		Select()
+	if err != nil {
+		return result, err
+	}
+	return result, nil
+}
+func AddCommentDB(userID int, nomineeID int, content string) (int, error){
+  fmt.Println("going to add the comment ", content, " userid: ", userID, " nomineeID: ", nomineeID)
+  err := db.Insert(&Comment{
+    Userid : userID,
+    Nomineeid : nomineeID,
+    Content : content,
+  })
+  if(err != nil){
+    return -1, err
+  }
+
+  return 0, nil
 }
 
 // ApproveNomineeDB uses the ID parameter to updates a record's status value

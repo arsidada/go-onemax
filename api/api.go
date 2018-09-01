@@ -5,6 +5,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"strconv"
+  "fmt"
 )
 
 // GetSubmittedNominees is the function handler used to handle the GET request
@@ -22,6 +23,42 @@ func GetSubmittedNominees(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+func GetComments(c *gin.Context) {
+	NomineeIDString := c.GetHeader("NomineeID")
+	NomineeID, err := strconv.Atoi(NomineeIDString)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+	}
+	result, err := psql.GetCommentsFromDB(NomineeID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+	}
+	c.JSON(http.StatusOK, result)
+}
+func AddComment(c *gin.Context) {
+  fmt.Println("1. starting add comment")
+	useridString := c.GetHeader("user")
+	userid , err := strconv.Atoi(useridString)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+	}
+  fmt.Println("2. ")
+	NomineeIDString := c.Param("NOMID") // generate ID
+	NomineeID , err := strconv.Atoi(NomineeIDString)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+	}
+	content := c.GetHeader("content")
+  fmt.Println("3. ")
+
+  _, err2 := psql.AddCommentDB(userid, NomineeID, content)
+	if err2 != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+	}
+  fmt.Println("4. ")
+	c.JSON(http.StatusOK, "the comment has been added")
 }
 
 // ApproveNominee is the function hanlder user to handle the POST request
