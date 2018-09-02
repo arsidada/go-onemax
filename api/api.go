@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"github.com/arsidada/go-onemax/psql"
 	"github.com/gin-gonic/gin"
 	"net/http"
@@ -23,42 +22,6 @@ func GetSubmittedNominees(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 	}
 	c.JSON(http.StatusOK, result)
-}
-
-func GetComments(c *gin.Context) {
-	NomineeIDString := c.GetHeader("NomineeID")
-	NomineeID, err := strconv.Atoi(NomineeIDString)
-	if err != nil {
-		c.String(http.StatusInternalServerError, err.Error())
-	}
-	result, err := psql.GetCommentsFromDB(NomineeID)
-	if err != nil {
-		c.String(http.StatusInternalServerError, err.Error())
-	}
-	c.JSON(http.StatusOK, result)
-}
-func AddComment(c *gin.Context) {
-	fmt.Println("1. starting add comment")
-	useridString := c.GetHeader("user")
-	userid, err := strconv.Atoi(useridString)
-	if err != nil {
-		c.String(http.StatusInternalServerError, err.Error())
-	}
-	fmt.Println("2. ")
-	NomineeIDString := c.Param("NOMID") // generate ID
-	NomineeID, err := strconv.Atoi(NomineeIDString)
-	if err != nil {
-		c.String(http.StatusInternalServerError, err.Error())
-	}
-	content := c.GetHeader("content")
-	fmt.Println("3. ")
-
-	_, err2 := psql.AddCommentDB(userid, NomineeID, content)
-	if err2 != nil {
-		c.String(http.StatusInternalServerError, err.Error())
-	}
-	fmt.Println("4. ")
-	c.JSON(http.StatusOK, "the comment has been added")
 }
 
 // ApproveNominee is the function hanlder user to handle the POST request
@@ -105,6 +68,47 @@ func RejectNominee(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 	}
 	c.JSON(http.StatusOK, "Nominee rejected successfully!")
+}
+
+// GetComments is the function handler to handle the GET request
+// for fetching all comments associated with a NomineeID
+func GetComments(c *gin.Context) {
+	NomineeIDString := c.Param("NomineeID")
+	NomineeID, err := strconv.Atoi(NomineeIDString)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+	}
+
+	result, err := psql.GetCommentsFromDB(NomineeID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// AddComment is the function handler to create a comment for the
+// given NomineeID and associate it with the user who has supplied the comment
+func AddComment(c *gin.Context) {
+	username := c.GetHeader("username")
+
+	NomineeIDString := c.Param("NomineeID") // generate ID
+	NomineeID, err := strconv.Atoi(NomineeIDString)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+	}
+
+	buf := make([]byte, 1024)
+	num, err := c.Request.Body.Read(buf)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+	}
+	content := string(buf[0:num])
+	_, err2 := psql.AddCommentDB(username, NomineeID, content)
+	if err2 != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+	}
+	c.JSON(http.StatusOK, "Comment added successfully!")
 }
 
 // checkAuthorization is a helper function to check if the provided user param matches

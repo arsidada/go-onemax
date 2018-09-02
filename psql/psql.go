@@ -20,10 +20,11 @@ type Nomination struct {
 	Duas        int
 }
 
+// Comment is an object definition to store value from the Comment table
 type Comment struct {
 	ID        int
 	Nomineeid int
-	Userid    int
+	Username  string
 	Content   string
 	Createdat string
 }
@@ -65,30 +66,6 @@ func GetSubmittedNomineesFromDB() ([]Nomination, error) {
 	return result, nil
 }
 
-func GetCommentsFromDB(NomineeID int) ([]Comment, error) {
-	result := make([]Comment, 0)
-	err := db.Model(&result).
-		Where("nomineeid = ?", NomineeID).
-		Select()
-	if err != nil {
-		return result, err
-	}
-	return result, nil
-}
-func AddCommentDB(userID int, nomineeID int, content string) (int, error) {
-	fmt.Println("going to add the comment ", content, " userid: ", userID, " nomineeID: ", nomineeID)
-	err := db.Insert(&Comment{
-		Userid:    userID,
-		Nomineeid: nomineeID,
-		Content:   content,
-	})
-	if err != nil {
-		return -1, err
-	}
-
-	return 0, nil
-}
-
 // ApproveNomineeDB uses the ID parameter to updates a record's status value
 // from 'submitted' to 'approved'. We return a 200 if the update is successful.
 // Otherwise we return a 500 and an error
@@ -124,4 +101,32 @@ func RejectNomineeDB(ApprovalID int) (int, error) {
 		return 500, err
 	}
 	return 200, nil
+}
+
+// GetCommentsFromDB fetches all rows from the comments table for a
+// given NomineeID
+func GetCommentsFromDB(NomineeID int) ([]Comment, error) {
+	result := make([]Comment, 0)
+	err := db.Model(&result).
+		Where("nomineeid = ?", NomineeID).
+		Select()
+	if err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+// AddCommentDB add a new entry to the comments table for a
+// given NomineeID and UserID combination
+func AddCommentDB(username string, nomineeID int, content string) (int, error) {
+	fmt.Println("Adding new comment with content: ", content, " username: ", username, " nomineeID: ", nomineeID)
+	err := db.Insert(&Comment{
+		Username:  username,
+		Nomineeid: nomineeID,
+		Content:   content,
+	})
+	if err != nil {
+		return -1, err
+	}
+	return 0, nil
 }
