@@ -2,6 +2,7 @@ package psql
 
 import (
 	"crypto/tls"
+	"fmt"
 	"github.com/go-pg/pg"
 	"os"
 	// "github.com/go-pg/pg/orm"
@@ -17,6 +18,15 @@ type Nomination struct {
 	Status      string
 	Image       string
 	Duas        int
+}
+
+// Comment is an object definition to store value from the Comment table
+type Comment struct {
+	ID        int
+	Nomineeid int
+	Username  string
+	Content   string
+	Createdat string
 }
 
 // Global var to hold the database object
@@ -91,4 +101,32 @@ func RejectNomineeDB(ApprovalID int) (int, error) {
 		return 500, err
 	}
 	return 200, nil
+}
+
+// GetCommentsFromDB fetches all rows from the comments table for a
+// given NomineeID
+func GetCommentsFromDB(NomineeID int) ([]Comment, error) {
+	result := make([]Comment, 0)
+	err := db.Model(&result).
+		Where("nomineeid = ?", NomineeID).
+		Select()
+	if err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+// AddCommentDB add a new entry to the comments table for a
+// given NomineeID and UserID combination
+func AddCommentDB(username string, nomineeID int, content string) (int, error) {
+	fmt.Println("Adding new comment with content: ", content, " username: ", username, " nomineeID: ", nomineeID)
+	err := db.Insert(&Comment{
+		Username:  username,
+		Nomineeid: nomineeID,
+		Content:   content,
+	})
+	if err != nil {
+		return -1, err
+	}
+	return 0, nil
 }
