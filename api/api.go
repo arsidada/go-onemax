@@ -1,11 +1,11 @@
 package api
 
 import (
+	"fmt"
 	"github.com/arsidada/go-onemax/psql"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"strconv"
-  "fmt"
 )
 
 // GetSubmittedNominees is the function handler used to handle the GET request
@@ -38,26 +38,26 @@ func GetComments(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 func AddComment(c *gin.Context) {
-  fmt.Println("1. starting add comment")
+	fmt.Println("1. starting add comment")
 	useridString := c.GetHeader("user")
-	userid , err := strconv.Atoi(useridString)
+	userid, err := strconv.Atoi(useridString)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 	}
-  fmt.Println("2. ")
+	fmt.Println("2. ")
 	NomineeIDString := c.Param("NOMID") // generate ID
-	NomineeID , err := strconv.Atoi(NomineeIDString)
+	NomineeID, err := strconv.Atoi(NomineeIDString)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 	}
 	content := c.GetHeader("content")
-  fmt.Println("3. ")
+	fmt.Println("3. ")
 
-  _, err2 := psql.AddCommentDB(userid, NomineeID, content)
+	_, err2 := psql.AddCommentDB(userid, NomineeID, content)
 	if err2 != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 	}
-  fmt.Println("4. ")
+	fmt.Println("4. ")
 	c.JSON(http.StatusOK, "the comment has been added")
 }
 
