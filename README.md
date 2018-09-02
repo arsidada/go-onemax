@@ -14,6 +14,12 @@ This app currently handles the following APIs:
 
     3. /reject_nominee/:ID - POST
     - same as approve but changes status to rejected
+    
+    4. /comments/:NomineeID - GET
+    - get all comments for a NomineeID
+    
+    5. /comments/:NomineeID - POST
+    - add a new comment for a NomineeID
 
 ## Development Instructions
 
