@@ -26,8 +26,9 @@ func GetSubmittedNominees(c *gin.Context) {
 
 // ReturnHeaders allows us to make CORS calls from the UI
 func ReturnHeaders(c *gin.Context) {
+	origin := c.GetHeader("Origin")
 	c.Header("Access-Control-Allowed-Method", "HEAD,PUT,POST,GET,DELETE,OPTIONS")
-	c.Header("Access-Control-Allow-Origin", "true")
+	c.Header("Access-Control-Allow-Origin", origin)
 	c.Header("Access-Control-Allow-Headers", "accept, authorization, origin, user")
 
 	c.JSON(http.StatusOK, "Options call succeeded!")
