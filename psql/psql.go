@@ -10,14 +10,14 @@ import (
 
 // Nomination is an object definition to store values from the Nomination table
 type Nomination struct {
-	ID          int
-	Name        string
-	Description string
-	Country     string
-	Province    string
-	Status      string
-	Image       string
-	Duas        int
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Country     string `json:"country"`
+	Province    string `json:"province"`
+	Status      string `json:"status"`
+	Image       string `json:"image"`
+	Duas        int    `json:"duas"`
 }
 
 // Comment is an object definition to store value from the Comment table
