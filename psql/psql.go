@@ -76,12 +76,10 @@ func ApproveNomineeDB(ApprovalID int) (int, error) {
 		return 500, err
 	}
 
-	nomination.Status = "approved"
-	err = db.Update(nomination)
+	_, err = db.Model(nomination).Set("status = ?", "approved").Where("id = ?", ApprovalID).Update()
 	if err != nil {
 		return 500, err
 	}
-
 	return 200, nil
 }
 
@@ -95,8 +93,7 @@ func RejectNomineeDB(ApprovalID int) (int, error) {
 		return 500, err
 	}
 
-	nomination.Status = "rejected"
-	err = db.Update(nomination)
+	_, err = db.Model(nomination).Set("status = ?", "rejected").Where("id = ?", ApprovalID).Update()
 	if err != nil {
 		return 500, err
 	}

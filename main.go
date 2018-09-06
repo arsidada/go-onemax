@@ -25,7 +25,7 @@ func main() {
 	// Routes for Approvals API
 	router.GET("/submitted_nominees", api.GetSubmittedNominees)
 	router.POST("/approve_nominee/:ID", api.ApproveNominee)
-	router.POST("/reject_nominee/:ID", api.ApproveNominee)
+	router.POST("/reject_nominee/:ID", api.RejectNominee)
 
 	// Routes for Comments API
 	router.GET("/comments/:NomineeID", api.GetComments)
