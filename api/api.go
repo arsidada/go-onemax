@@ -86,8 +86,12 @@ func GetComments(c *gin.Context) {
 	}
 
 	newResult := make([]psql.Comment, len(result))
-	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
-		newResult[i], newResult[j] = result[j], result[i]
+	if len(result) > 1 {
+		for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+			newResult[i], newResult[j] = result[j], result[i]
+		}
+	} else {
+		newResult = result
 	}
 
 	c.JSON(http.StatusOK, newResult)
