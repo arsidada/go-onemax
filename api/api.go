@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"github.com/arsidada/go-onemax/psql"
 	"github.com/gin-gonic/gin"
 	"net/http"
@@ -98,12 +99,11 @@ func AddComment(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 	}
 
-	buf := make([]byte, 1024)
-	num, err := c.Request.Body.Read(buf)
-	if err != nil {
-		c.String(http.StatusBadRequest, err.Error())
-	}
-	content := string(buf[0:num])
+	buf := new(bytes.Buffer)
+	body := c.Request.Body
+	buf.ReadFrom(body)
+	content := buf.String()
+
 	_, err2 := psql.AddCommentDB(username, NomineeID, content)
 	if err2 != nil {
 		c.String(http.StatusInternalServerError, err.Error())
