@@ -114,8 +114,8 @@ func AddComment(c *gin.Context) {
 // checkAuthorization is a helper function to check if the provided user param matches
 // what we have declared as authorized users
 func checkAuthorization(user string) int {
-	if user == "" && user != "105364027055888" && user != "111223425403387795098" {
-		return http.StatusUnauthorized
+	if user == "105364027055888" || user == "111223425403387795098" {
+		return http.StatusOK
 	}
-	return http.StatusOK
+	return http.StatusUnauthorized
 }
