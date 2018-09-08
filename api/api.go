@@ -85,16 +85,16 @@ func GetComments(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 	}
 
-	newResult := make([]psql.Comment, len(result))
-	if len(result) > 1 {
-		for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
-			newResult[i], newResult[j] = result[j], result[i]
-		}
-	} else {
-		newResult = result
-	}
+	// newResult := make([]psql.Comment, len(result))
+	// if len(result) > 1 {
+	// 	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+	// 		newResult[i], newResult[j] = result[j], result[i]
+	// 	}
+	// } else {
+	// 	newResult = result
+	// }
 
-	c.JSON(http.StatusOK, newResult)
+	c.JSON(http.StatusOK, result)
 }
 
 // AddComment is the function handler to create a comment for the
